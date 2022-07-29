@@ -1,0 +1,62 @@
+#!/bin/bash
+
+while getopts e:d:o: flag
+do
+    case "${flag}" in
+        e) ENC=${OPTARG};;
+        d) DEC=${OPTARG};;
+        o) OUT=${OPTARG};;
+        *) help
+    esac
+done
+
+function help {
+    printf "Usage: \nEncrypt: $0 -e <folder name> -o <output file> \nDecrypt: ${0} -d <encrypted file> -o <output>\n"
+}
+
+if [ "$ENC" ] && [  "$DEC" ]  ; then
+  help
+  exit 1
+fi
+
+if [ -z "$ENC" ] && [ -z "$DEC" ] ; then
+  help
+  exit 1
+fi
+
+if  [ -z "$OUT" ] ; then
+        help
+        exit 1
+  fi
+
+RUN=$(date +%s)
+
+if [ "$ENC" ] ; then
+    tar -czf "$OUT".tgz "$ENC"
+    echo 'Please specify the passphrase you want to use to encrypt the folder'
+    read -rs VPASS
+    echo "$VPASS" | sha512sum > /var/tmp/"$RUN"
+    cat /var/tmp/"$RUN" | gpg --batch --yes --quiet --output - --passphrase-fd 0 --no-symkey-cache --symmetric "$OUT".tgz | base64 -w 60 > "${OUT}.vault"
+    \rm -f /var/tmp/"$RUN" "$OUT".tgz
+    unset VPASS
+    printf "Your folder is now encrypted in $OUT.vault\nPlease remember to delete the original folder.\n"
+fi
+
+if [ "$DEC" ] ; then
+  echo "Trying to decrypt ${DEC}"
+  echo 'Please specify the passphrase you used to encrypt the folder'
+  read -rs VPASS
+  echo "$VPASS" | sha512sum > /var/tmp/"$RUN"
+  cat $DEC | base64 -d > $DEC.vault
+  cat /var/tmp/"$RUN" | gpg --batch --yes --quiet --decrypt --output $OUT.tgz --passphrase-fd 0 $DEC.vault
+  DEC_OUT=$?
+  \rm -f /var/tmp/"$RUN"
+  unset VPASS
+  if [ $DEC_OUT -ne 0 ] ; then
+    echo "$0 was unable to decrypt your data. Please try with a different passphrase."
+    exit 1
+  fi
+  tar -xzf $OUT.tgz
+  \rm $OUT.tgz $DEC.vault
+  echo "Your data was decrypted in ${OUT}"
+fi
